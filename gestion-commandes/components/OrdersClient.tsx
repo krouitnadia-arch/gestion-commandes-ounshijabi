@@ -48,7 +48,27 @@ const FORMULAIRE_VIDE = {
 
 const listeNue = { listStyle: "none", margin: 0, padding: 0 } as const;
 
-function Variante({ valeur, couleurFond, couleurTexte }: { valeur?: string; couleurFond: string; couleurTexte: string }) {
+const boutonConfirmer = {
+  background: "#25D366",
+  color: "white",
+  border: "none",
+  padding: "8px 14px",
+  borderRadius: 8,
+  cursor: "pointer",
+  fontSize: 12,
+  fontWeight: 700,
+  whiteSpace: "nowrap",
+} as const;
+
+function Variante({
+  valeur,
+  couleurFond,
+  couleurTexte,
+}: {
+  valeur?: string;
+  couleurFond: string;
+  couleurTexte: string;
+}) {
   if (!valeur) return <span style={{ color: "#94a3b8" }}>—</span>;
   return (
     <span
@@ -66,6 +86,27 @@ function Variante({ valeur, couleurFond, couleurTexte }: { valeur?: string; coul
       {valeur}
     </span>
   );
+}
+
+function messageConfirmation(order: Order) {
+  const lignes = (order.produits || []).map((p) => {
+    const details: string[] = [];
+    if (p.taille) details.push(`المقاس: ${p.taille}`);
+    if (p.couleur) details.push(`اللون: ${p.couleur}`);
+    const quantite = p.quantite > 1 ? ` × ${p.quantite}` : "";
+    const suffixe = details.length > 0 ? ` — ${details.join(" — ")}` : "";
+    return `• ${p.nom}${quantite}${suffixe}`;
+  });
+
+  return [
+    `السلام عليكم ${order.clientNom}`,
+    "",
+    "معكم فريق عمل ouns hijabi نتواصل معكم لتأكيد طلبيتكم التي قمتم بإجراءها عبر موقعنا الالكتروني :",
+    "",
+    ...lignes,
+    "",
+    "هل تريدون تأكيد طلبيتكم؟",
+  ].join("\n");
 }
 
 export default function OrdersClient() {
@@ -131,14 +172,26 @@ export default function OrdersClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleCall(order: Order) {
-    const number = toWhatsAppNumber(order.clientTelephone);
+  async function marquerAppele(order: Order) {
     await fetch(`/api/orders/${order.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ marquerAppele: true }),
     });
-    window.open(`https://wa.me/${number}`, "_blank");
+  }
+
+  async function envoyerConfirmation(order: Order) {
+    const numero = toWhatsAppNumber(order.clientTelephone);
+    const texte = encodeURIComponent(messageConfirmation(order));
+    await marquerAppele(order);
+    window.open(`https://wa.me/${numero}?text=${texte}`, "_blank");
+    loadOrders();
+  }
+
+  async function handleCall(order: Order) {
+    const numero = toWhatsAppNumber(order.clientTelephone);
+    await marquerAppele(order);
+    window.open(`https://wa.me/${numero}`, "_blank");
     loadOrders();
   }
 
@@ -301,6 +354,7 @@ export default function OrdersClient() {
           <table>
             <thead>
               <tr>
+                {onglet === "web" && <th>{L("Confirmation", "التأكيد")}</th>}
                 <th>{t("col_number")}</th>
                 <th>{t("col_client")}</th>
                 <th>{t("col_phone")}</th>
@@ -318,11 +372,18 @@ export default function OrdersClient() {
             <tbody>
               {liste.map((o) => (
                 <tr key={o.id} style={{ backgroundColor: STATUS_CONFIG[o.statut].bg + "55" }}>
+                  {onglet === "web" && (
+                    <td>
+                      <button type="button" style={boutonConfirmer} onClick={() => envoyerConfirmation(o)}>
+                        {L("Confirmer", "تأكيد")}
+                      </button>
+                    </td>
+                  )}
                   <td>{o.numero}</td>
                   <td>{o.clientNom}</td>
                   <td>
                     <button className="phone-btn" onClick={() => handleCall(o)} type="button">
-                      {o.clientTelephone} · {t("call_button")}
+                      {o.clientTelephone}
                     </button>
                   </td>
                   <td>
@@ -335,9 +396,7 @@ export default function OrdersClient() {
                         <li key={i} style={{ marginBottom: 6 }}>
                           {p.nom} × {p.quantite}
                           {p.options && p.options.length > 0 && (
-                            <div style={{ fontSize: 11, color: "#64748b" }}>
-                              {p.options.join(" · ")}
-                            </div>
+                            <div style={{ fontSize: 11, color: "#64748b" }}>{p.options.join(" · ")}</div>
                           )}
                         </li>
                       ))}
@@ -367,40 +426,4 @@ export default function OrdersClient() {
                     <StatusBadge statut={o.statut} />
                     <select
                       value={o.statut}
-                      onChange={(e) => handleStatusChange(o, e.target.value as OrderStatus)}
-                      aria-label={t("status_change")}
-                    >
-                      {STATUS_LIST.map((s) => (
-                        <option key={s} value={s}>
-                          {lang === "ar" ? STATUS_CONFIG[s].labelAr : STATUS_CONFIG[s].labelFr}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <input
-                      defaultValue={o.notes || ""}
-                      onBlur={(e) => handleNotesBlur(o, e.target.value)}
-                      className="notes-input"
-                    />
-                  </td>
-                  {onglet === "instagram" && (
-                    <td>
-                      <button
-                        className="btn-link danger"
-                        onClick={() => supprimerCommande(o)}
-                        type="button"
-                      >
-                        {t("delete")}
-                      </button>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
+                      onChange={(e) => handleStatusChange(o,
