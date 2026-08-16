@@ -5,10 +5,13 @@ import { fetchWooOrders, wooOrderToLocal } from "@/lib/woocommerce";
 
 export async function POST() {
   const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  if (!session) return NextResponse.json({ error: "Non authentifie" }, { status: 401 });
 
   try {
-    const wooOrders = await fetchWooOrders({ perPage: 100 });
+    const debut = process.env.SYNC_DEBUT || "2026-08-01";
+    const after = new Date(`${debut}T00:00:00Z`).toISOString();
+
+    const wooOrders = await fetchWooOrders({ perPage: 100, after });
     let nouvelles = 0;
 
     for (const wo of wooOrders) {
@@ -19,8 +22,6 @@ export async function POST() {
         await prisma.order.create({ data: local });
         nouvelles++;
       } else {
-        // On met à jour uniquement les informations "site" (jamais le statut
-        // interne, ni l'indicateur d'appel/livraison choisis par l'équipe)
         await prisma.order.update({
           where: { wooId: wo.id },
           data: {
@@ -36,10 +37,14 @@ export async function POST() {
     }
 
     await prisma.syncLog.create({
-      data: { nbNouvelles: nouvelles, succes: true, message: `${wooOrders.length} commandes vérifiées` },
+      data: {
+        nbNouvelles: nouvelles,
+        succes: true,
+        message: `${wooOrders.length} commandes verifiees depuis le ${debut}`,
+      },
     });
 
-    return NextResponse.json({ ok: true, nouvelles, total: wooOrders.length });
+    return NextResponse.json({ ok: true, nouvelles, total: wooOrders.length, depuis: debut });
   } catch (e: any) {
     await prisma.syncLog.create({
       data: { nbNouvelles: 0, succes: false, message: e.message },
