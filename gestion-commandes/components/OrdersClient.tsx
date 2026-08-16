@@ -5,6 +5,7 @@ import { useLang } from "./LangProvider";
 import StatusBadge from "./StatusBadge";
 import { STATUS_CONFIG, STATUS_LIST, OrderStatus } from "@/lib/statusConfig";
 import { toWhatsAppNumber } from "@/lib/whatsapp";
+import { messageConfirmation } from "@/lib/messageWhatsapp";
 
 type Produit = {
   nom: string;
@@ -86,31 +87,6 @@ function Variante({
       {valeur}
     </span>
   );
-}
-
-// Message de confirmation envoye au client sur WhatsApp
-function messageConfirmation(order: Order) {
-  const origine =
-    order.wooId < 0 ? "عبر انستغرام" : "عبر موقعنا الالكتروني";
-
-  const lignes = (order.produits || []).map((p) => {
-    const details: string[] = [];
-    if (p.taille) details.push(`المقاس: ${p.taille}`);
-    if (p.couleur) details.push(`اللون: ${p.couleur}`);
-    const quantite = p.quantite > 1 ? ` × ${p.quantite}` : "";
-    const suffixe = details.length > 0 ? ` — ${details.join(" — ")}` : "";
-    return `• ${p.nom}${quantite}${suffixe}`;
-  });
-
-  return [
-    `السلام عليكم ${order.clientNom}`,
-    "",
-    `معكم فريق عمل ouns hijabi نتواصل معكم لتأكيد طلبيتكم التي قمتم بإجراءها ${origine} :`,
-    "",
-    ...lignes,
-    "",
-    "هل تريدون تأكيد طلبيتكم؟",
-  ].join("\n");
 }
 
 export default function OrdersClient() {
@@ -358,7 +334,7 @@ export default function OrdersClient() {
           <table>
             <thead>
               <tr>
-                <th>{L("Confirmation", "التأكيد")}</th>
+                {onglet === "web" && <th>{L("Confirmation", "التأكيد")}</th>}
                 <th>{t("col_number")}</th>
                 <th>{t("col_client")}</th>
                 <th>{t("col_phone")}</th>
@@ -376,11 +352,13 @@ export default function OrdersClient() {
             <tbody>
               {liste.map((o) => (
                 <tr key={o.id} style={{ backgroundColor: STATUS_CONFIG[o.statut].bg + "55" }}>
-                  <td>
-                    <button type="button" style={boutonConfirmer} onClick={() => envoyerConfirmation(o)}>
-                      {L("Confirmer", "تأكيد")}
-                    </button>
-                  </td>
+                  {onglet === "web" && (
+                    <td>
+                      <button type="button" style={boutonConfirmer} onClick={() => envoyerConfirmation(o)}>
+                        {L("Confirmer", "تأكيد")}
+                      </button>
+                    </td>
+                  )}
                   <td>{o.numero}</td>
                   <td>{o.clientNom}</td>
                   <td>
