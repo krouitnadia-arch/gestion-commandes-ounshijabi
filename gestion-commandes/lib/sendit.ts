@@ -108,3 +108,14 @@ export async function creerColis(colis: Record<string, unknown>) {
 export async function suivreColis(code: string) {
   return appel(`/deliveries/${encodeURIComponent(code)}`);
 }
+
+export async function modifierColis(code: string, colis: Record<string, unknown>) {
+  return appel(`/deliveries/${encodeURIComponent(code)}`, {
+    method: "PUT",
+    body: JSON.stringify(colis),
+  });
+}
+
+export async function supprimerColis(code: string) {
+  return appel(`/deliveries/${encodeURIComponent(code)}`, { method: "DELETE" });
+}
