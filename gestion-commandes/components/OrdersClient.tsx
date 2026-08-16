@@ -6,7 +6,14 @@ import StatusBadge from "./StatusBadge";
 import { STATUS_CONFIG, STATUS_LIST, OrderStatus } from "@/lib/statusConfig";
 import { toWhatsAppNumber } from "@/lib/whatsapp";
 
-type Produit = { nom: string; quantite: number; total: string };
+type Produit = {
+  nom: string;
+  quantite: number;
+  total: string;
+  couleur?: string;
+  taille?: string;
+  options?: string[];
+};
 
 type Order = {
   id: string;
@@ -33,9 +40,33 @@ const FORMULAIRE_VIDE = {
   clientVille: "",
   clientAdresse: "",
   produit: "",
+  couleur: "",
+  taille: "",
   quantite: "1",
   total: "",
 };
+
+const listeNue = { listStyle: "none", margin: 0, padding: 0 } as const;
+
+function Variante({ valeur, couleurFond, couleurTexte }: { valeur?: string; couleurFond: string; couleurTexte: string }) {
+  if (!valeur) return <span style={{ color: "#94a3b8" }}>—</span>;
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        background: couleurFond,
+        color: couleurTexte,
+        padding: "3px 9px",
+        borderRadius: 999,
+        fontSize: 11,
+        fontWeight: 700,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {valeur}
+    </span>
+  );
+}
 
 export default function OrdersClient() {
   const { t, lang } = useLang();
@@ -232,6 +263,16 @@ export default function OrdersClient() {
               onChange={(e) => setForm({ ...form, produit: e.target.value })}
             />
             <input
+              placeholder={L("Couleur", "اللون")}
+              value={form.couleur}
+              onChange={(e) => setForm({ ...form, couleur: e.target.value })}
+            />
+            <input
+              placeholder={L("Taille", "المقاس")}
+              value={form.taille}
+              onChange={(e) => setForm({ ...form, taille: e.target.value })}
+            />
+            <input
               type="number"
               placeholder={L("Quantite", "الكمية")}
               value={form.quantite}
@@ -265,6 +306,8 @@ export default function OrdersClient() {
                 <th>{t("col_phone")}</th>
                 <th>{t("col_address")}</th>
                 <th>{t("col_products")}</th>
+                <th>{L("Couleur", "اللون")}</th>
+                <th>{L("Taille", "المقاس")}</th>
                 <th>{t("col_total")}</th>
                 <th>{t("col_date")}</th>
                 <th>{t("col_status")}</th>
@@ -287,10 +330,33 @@ export default function OrdersClient() {
                     {o.clientVille ? `, ${o.clientVille}` : ""}
                   </td>
                   <td>
-                    <ul className="products-list">
+                    <ul style={listeNue}>
                       {o.produits?.map((p, i) => (
-                        <li key={i}>
+                        <li key={i} style={{ marginBottom: 6 }}>
                           {p.nom} × {p.quantite}
+                          {p.options && p.options.length > 0 && (
+                            <div style={{ fontSize: 11, color: "#64748b" }}>
+                              {p.options.join(" · ")}
+                            </div>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </td>
+                  <td>
+                    <ul style={listeNue}>
+                      {o.produits?.map((p, i) => (
+                        <li key={i} style={{ marginBottom: 6 }}>
+                          <Variante valeur={p.couleur} couleurFond="#e0e7ff" couleurTexte="#3730a3" />
+                        </li>
+                      ))}
+                    </ul>
+                  </td>
+                  <td>
+                    <ul style={listeNue}>
+                      {o.produits?.map((p, i) => (
+                        <li key={i} style={{ marginBottom: 6 }}>
+                          <Variante valeur={p.taille} couleurFond="#fce7f3" couleurTexte="#9d174d" />
                         </li>
                       ))}
                     </ul>
