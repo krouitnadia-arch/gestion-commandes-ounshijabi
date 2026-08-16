@@ -26,7 +26,14 @@ export async function POST(req: NextRequest) {
       clientAdresse: body.clientAdresse || "",
       clientVille: body.clientVille || "",
       produits: [
-        { nom: body.produit || "Produit", quantite, total: String(total) },
+        {
+          nom: body.produit || "Produit",
+          quantite,
+          total: String(total),
+          couleur: body.couleur || "",
+          taille: body.taille || "",
+          options: [],
+        },
       ],
       total,
       dateCommande: new Date(),
