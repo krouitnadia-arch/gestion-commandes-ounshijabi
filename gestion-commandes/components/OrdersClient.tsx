@@ -88,7 +88,11 @@ function Variante({
   );
 }
 
+// Message de confirmation envoye au client sur WhatsApp
 function messageConfirmation(order: Order) {
+  const origine =
+    order.wooId < 0 ? "عبر انستغرام" : "عبر موقعنا الالكتروني";
+
   const lignes = (order.produits || []).map((p) => {
     const details: string[] = [];
     if (p.taille) details.push(`المقاس: ${p.taille}`);
@@ -101,7 +105,7 @@ function messageConfirmation(order: Order) {
   return [
     `السلام عليكم ${order.clientNom}`,
     "",
-    "معكم فريق عمل ouns hijabi نتواصل معكم لتأكيد طلبيتكم التي قمتم بإجراءها عبر موقعنا الالكتروني :",
+    `معكم فريق عمل ouns hijabi نتواصل معكم لتأكيد طلبيتكم التي قمتم بإجراءها ${origine} :`,
     "",
     ...lignes,
     "",
@@ -354,7 +358,7 @@ export default function OrdersClient() {
           <table>
             <thead>
               <tr>
-                {onglet === "web" && <th>{L("Confirmation", "التأكيد")}</th>}
+                <th>{L("Confirmation", "التأكيد")}</th>
                 <th>{t("col_number")}</th>
                 <th>{t("col_client")}</th>
                 <th>{t("col_phone")}</th>
@@ -372,13 +376,11 @@ export default function OrdersClient() {
             <tbody>
               {liste.map((o) => (
                 <tr key={o.id} style={{ backgroundColor: STATUS_CONFIG[o.statut].bg + "55" }}>
-                  {onglet === "web" && (
-                    <td>
-                      <button type="button" style={boutonConfirmer} onClick={() => envoyerConfirmation(o)}>
-                        {L("Confirmer", "تأكيد")}
-                      </button>
-                    </td>
-                  )}
+                  <td>
+                    <button type="button" style={boutonConfirmer} onClick={() => envoyerConfirmation(o)}>
+                      {L("Confirmer", "تأكيد")}
+                    </button>
+                  </td>
                   <td>{o.numero}</td>
                   <td>{o.clientNom}</td>
                   <td>
@@ -426,4 +428,36 @@ export default function OrdersClient() {
                     <StatusBadge statut={o.statut} />
                     <select
                       value={o.statut}
-                      onChange={(e) => handleStatusChange(o,
+                      onChange={(e) => handleStatusChange(o, e.target.value as OrderStatus)}
+                      aria-label={t("status_change")}
+                    >
+                      {STATUS_LIST.map((s) => (
+                        <option key={s} value={s}>
+                          {lang === "ar" ? STATUS_CONFIG[s].labelAr : STATUS_CONFIG[s].labelFr}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <input
+                      defaultValue={o.notes || ""}
+                      onBlur={(e) => handleNotesBlur(o, e.target.value)}
+                      className="notes-input"
+                    />
+                  </td>
+                  {onglet === "instagram" && (
+                    <td>
+                      <button className="btn-link danger" onClick={() => supprimerCommande(o)} type="button">
+                        {t("delete")}
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
