@@ -9,9 +9,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ erreur: "Cle invalide." }, { status: 401 });
   }
 
+  const etapes: string[] = [];
+
   await prisma.$executeRawUnsafe(
     `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "senditCode" TEXT;`
   );
+  etapes.push("Colonne senditCode verifiee");
 
-  return NextResponse.json({ succes: true, message: "Colonne senditCode ajoutee." });
+  await prisma.$executeRawUnsafe(
+    `ALTER TYPE "OrderStatus" ADD VALUE IF NOT EXISTS 'EXPEDIEE';`
+  );
+  etapes.push("Statut EXPEDIEE ajoute");
+
+  return NextResponse.json({ succes: true, etapes });
 }
