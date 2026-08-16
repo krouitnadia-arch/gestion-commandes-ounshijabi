@@ -33,7 +33,10 @@ type Order = {
   notes: string | null;
 };
 
+type Groupe = { commandes: Order[]; date: number };
+
 const INTERVALLE_MS = 120000;
+const FENETRE_MS = 24 * 60 * 60 * 1000;
 
 const FORMULAIRE_VIDE = {
   clientNom: "",
@@ -59,6 +62,19 @@ const boutonConfirmer = {
   fontSize: 12,
   fontWeight: 700,
   whiteSpace: "nowrap",
+} as const;
+
+const boutonFusion = {
+  background: "#f59e0b",
+  color: "white",
+  border: "none",
+  padding: "6px 10px",
+  borderRadius: 6,
+  cursor: "pointer",
+  fontSize: 11,
+  fontWeight: 700,
+  whiteSpace: "nowrap",
+  marginBottom: 4,
 } as const;
 
 function Variante({
@@ -87,6 +103,54 @@ function Variante({
       {valeur}
     </span>
   );
+}
+
+function normaliserTelephone(tel: string) {
+  const chiffres = (tel || "").replace(/\D/g, "");
+  return chiffres.slice(-9);
+}
+
+// Regroupe les commandes d'un meme numero passees a moins de 24 heures d'ecart.
+function grouper(liste: Order[]): Groupe[] {
+  const parTelephone = new Map<string, Order[]>();
+
+  for (const o of liste) {
+    const cle = normaliserTelephone(o.clientTelephone) || o.id;
+    if (!parTelephone.has(cle)) parTelephone.set(cle, []);
+    parTelephone.get(cle)!.push(o);
+  }
+
+  const groupes: Groupe[] = [];
+
+  parTelephone.forEach((commandes) => {
+    const triees = [...commandes].sort(
+      (a, b) => new Date(b.dateCommande).getTime() - new Date(a.dateCommande).getTime()
+    );
+
+    let courant: Order[] = [];
+    for (const o of triees) {
+      if (courant.length === 0) {
+        courant = [o];
+        continue;
+      }
+      const precedent = courant[courant.length - 1];
+      const ecart =
+        new Date(precedent.dateCommande).getTime() - new Date(o.dateCommande).getTime();
+
+      if (ecart <= FENETRE_MS) {
+        courant.push(o);
+      } else {
+        groupes.push({ commandes: courant, date: new Date(courant[0].dateCommande).getTime() });
+        courant = [o];
+      }
+    }
+    if (courant.length > 0) {
+      groupes.push({ commandes: courant, date: new Date(courant[0].dateCommande).getTime() });
+    }
+  });
+
+  groupes.sort((a, b) => b.date - a.date);
+  return groupes;
 }
 
 export default function OrdersClient() {
@@ -213,13 +277,43 @@ export default function OrdersClient() {
   }
 
   async function supprimerCommande(order: Order) {
-    await fetch(`/api/orders/manuel?id=${order.id}`, { method: "DELETE" });
+    const ok = window.confirm(
+      L(
+        `Supprimer definitivement la commande ${order.numero} ?`,
+        `هل تريد حذف الطلب ${order.numero} نهائيا؟`
+      )
+    );
+    if (!ok) return;
+
+    await fetch(`/api/orders/gestion?id=${order.id}`, { method: "DELETE" });
+    loadOrders();
+  }
+
+  async function fusionner(groupe: Groupe) {
+    const ok = window.confirm(
+      L(
+        `Fusionner ces ${groupe.commandes.length} commandes en une seule ?`,
+        `هل تريد دمج هذه الطلبات (${groupe.commandes.length}) في طلب واحد؟`
+      )
+    );
+    if (!ok) return;
+
+    await fetch("/api/orders/gestion", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: groupe.commandes.map((c) => c.id) }),
+    });
     loadOrders();
   }
 
   const commandesWeb = orders.filter((o) => o.wooId > 0);
   const commandesInstagram = orders.filter((o) => o.wooId < 0);
   const liste = onglet === "web" ? commandesWeb : commandesInstagram;
+
+  const groupes = grouper(liste);
+  const rangees = groupes.flatMap((g) =>
+    g.commandes.map((o, i) => ({ o, g, premier: i === 0, multiple: g.commandes.length > 1 }))
+  );
 
   return (
     <div>
@@ -327,7 +421,7 @@ export default function OrdersClient() {
 
       {loading ? (
         <p>…</p>
-      ) : liste.length === 0 ? (
+      ) : rangees.length === 0 ? (
         <p className="empty">{t("orders_empty")}</p>
       ) : (
         <div className="table-wrap">
@@ -346,12 +440,18 @@ export default function OrdersClient() {
                 <th>{t("col_date")}</th>
                 <th>{t("col_status")}</th>
                 <th>{t("col_notes")}</th>
-                {onglet === "instagram" && <th>{t("col_actions")}</th>}
+                <th>{t("col_actions")}</th>
               </tr>
             </thead>
             <tbody>
-              {liste.map((o) => (
-                <tr key={o.id} style={{ backgroundColor: STATUS_CONFIG[o.statut].bg + "55" }}>
+              {rangees.map(({ o, g, premier, multiple }) => (
+                <tr
+                  key={o.id}
+                  style={{
+                    backgroundColor: STATUS_CONFIG[o.statut].bg + "55",
+                    borderInlineStart: multiple ? "4px solid #f59e0b" : undefined,
+                  }}
+                >
                   {onglet === "web" && (
                     <td>
                       <button type="button" style={boutonConfirmer} onClick={() => envoyerConfirmation(o)}>
@@ -359,7 +459,17 @@ export default function OrdersClient() {
                       </button>
                     </td>
                   )}
-                  <td>{o.numero}</td>
+                  <td>
+                    {o.numero}
+                    {multiple && premier && (
+                      <div style={{ fontSize: 10, color: "#b45309", fontWeight: 700, marginTop: 4 }}>
+                        {L(
+                          `${g.commandes.length} commandes — meme numero`,
+                          `${g.commandes.length} طلبات — نفس الرقم`
+                        )}
+                      </div>
+                    )}
+                  </td>
                   <td>{o.clientNom}</td>
                   <td>
                     <button className="phone-btn" onClick={() => handleCall(o)} type="button">
@@ -423,13 +533,16 @@ export default function OrdersClient() {
                       className="notes-input"
                     />
                   </td>
-                  {onglet === "instagram" && (
-                    <td>
-                      <button className="btn-link danger" onClick={() => supprimerCommande(o)} type="button">
-                        {t("delete")}
+                  <td>
+                    {multiple && premier && (
+                      <button type="button" style={boutonFusion} onClick={() => fusionner(g)}>
+                        {L(`Fusionner (${g.commandes.length})`, `دمج (${g.commandes.length})`)}
                       </button>
-                    </td>
-                  )}
+                    )}
+                    <button className="btn-link danger" onClick={() => supprimerCommande(o)} type="button">
+                      {t("delete")}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
