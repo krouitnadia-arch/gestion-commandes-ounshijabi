@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json();
   const orderId = body.orderId;
-  const districtId = body.districtId;
+  const districtId = Number(body.districtId);
 
   if (!orderId || !districtId) {
     return NextResponse.json({ error: "Commande ou ville manquante" }, { status: 400 });
@@ -36,38 +36,39 @@ export async function POST(req: NextRequest) {
   if (!order) return NextResponse.json({ error: "Commande introuvable" }, { status: 404 });
 
   if (order.senditCode) {
-    return NextResponse.json(
-      { error: `Colis deja cree (${order.senditCode})` },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: `Colis deja cree (${order.senditCode})` }, { status: 400 });
   }
 
   const produits = Array.isArray(order.produits) ? (order.produits as any[]) : [];
 
-  const articles = produits.map((p, i) => ({
-    reference: `${order.numero}-${i + 1}`,
-    name: [p?.nom, p?.couleur, p?.taille].filter(Boolean).join(" / "),
-    quantity: Number(p?.quantite) || 1,
-  }));
+  const articles = produits
+    .map((p, i) => ({
+      reference: `${order.numero}-${i + 1}`,
+      name: [p?.nom, p?.couleur, p?.taille].filter(Boolean).join(" / ").slice(0, 190) || "Article",
+      quantity: Math.max(1, Number(p?.quantite) || 1),
+    }))
+    .filter((a) => a.name);
 
-  const adresse = [order.clientAdresse, order.clientVille].filter(Boolean).join(", ");
+  const adresse = [order.clientAdresse, order.clientVille].filter(Boolean).join(", ").trim();
+  const telephone = (order.clientTelephone || "").replace(/\D/g, "");
+  const ramassage = Number(process.env.SENDIT_PICKUP_DISTRICT_ID);
 
-  const colis = {
-    pickup_district_id: process.env.SENDIT_PICKUP_DISTRICT_ID || "",
-    district_id: Number(districtId),
-    name: order.clientNom,
-    amount: Math.round(order.total || 0),
+  const colis: Record<string, unknown> = {
+    pickup_district_id: ramassage,
+    district_id: districtId,
+    name: (order.clientNom || "Client").trim(),
+    amount: Math.max(0, Math.round(order.total || 0)),
     address: adresse || "-",
-    phone: (order.clientTelephone || "").replace(/\D/g, ""),
-    comment: order.notes || "",
+    phone: telephone,
     reference: order.numero,
-    allow_open: Number(body.allowOpen) || 0,
-    allow_try: Number(body.allowTry) || 0,
+    allow_open: 0,
+    allow_try: 0,
     products_from_stock: 0,
     products: articles,
     option_exchange: 0,
-    delivery_exchange_id: "",
   };
+
+  if (order.notes) colis.comment = order.notes;
 
   try {
     const reponse = await creerColis(colis);
