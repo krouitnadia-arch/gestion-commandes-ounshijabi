@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLang } from "./LangProvider";
 import StatusBadge from "./StatusBadge";
 import { STATUS_CONFIG, STATUS_LIST, OrderStatus } from "@/lib/statusConfig";
@@ -24,45 +24,67 @@ type Order = {
   notes: string | null;
 };
 
+const INTERVALLE_MS = 120000;
+
 export default function OrdersClient() {
   const { t, lang } = useLang();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [derniereSync, setDerniereSync] = useState<Date | null>(null);
+  const enCours = useRef(false);
 
   async function loadOrders() {
-    setLoading(true);
     const res = await fetch("/api/orders");
     if (res.ok) setOrders(await res.json());
     setLoading(false);
   }
 
+  async function synchroniser(silencieux: boolean) {
+    if (enCours.current) return;
+    enCours.current = true;
+    if (!silencieux) setSyncing(true);
+
+    try {
+      const res = await fetch("/api/orders/sync", { method: "POST" });
+      const data = await res.json();
+
+      if (res.ok) {
+        setDerniereSync(new Date());
+        if (!silencieux || data.nouvelles > 0) {
+          setSyncMsg(
+            lang === "ar"
+              ? `تمت المزامنة: ${data.nouvelles} طلب جديد`
+              : `Synchronise : ${data.nouvelles} nouvelle(s) commande(s)`
+          );
+        }
+        await loadOrders();
+      } else {
+        setSyncMsg(data.error || "Erreur");
+      }
+    } catch (e: any) {
+      setSyncMsg(e?.message ?? "Erreur de connexion");
+    } finally {
+      enCours.current = false;
+      setSyncing(false);
+    }
+  }
+
   useEffect(() => {
     loadOrders();
-  }, []);
+    synchroniser(true);
 
-  async function handleSync() {
-    setSyncing(true);
-    setSyncMsg(null);
-    const res = await fetch("/api/orders/sync", { method: "POST" });
-    const data = await res.json();
-    if (res.ok) {
-      setSyncMsg(
-        lang === "ar"
-          ? `تمت المزامنة: ${data.nouvelles} طلب جديد`
-          : `Synchronisé : ${data.nouvelles} nouvelle(s) commande(s)`
-      );
-      await loadOrders();
-    } else {
-      setSyncMsg(data.error || "Erreur");
-    }
-    setSyncing(false);
-  }
+    const minuteur = setInterval(() => {
+      if (document.visibilityState === "visible") synchroniser(true);
+    }, INTERVALLE_MS);
+
+    return () => clearInterval(minuteur);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleCall(order: Order) {
     const number = toWhatsAppNumber(order.clientTelephone);
-    // Marque la commande comme "appelée" avant d'ouvrir WhatsApp
     await fetch(`/api/orders/${order.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -94,10 +116,19 @@ export default function OrdersClient() {
     <div>
       <div className="page-header">
         <h1>{t("orders_title")}</h1>
-        <button className="btn-primary" onClick={handleSync} disabled={syncing}>
+        <button className="btn-primary" onClick={() => synchroniser(false)} disabled={syncing}>
           {syncing ? t("orders_syncing") : t("orders_sync")}
         </button>
       </div>
+
+      <p className="sync-msg">
+        {lang === "ar" ? "المزامنة التلقائية مفعلة" : "Synchronisation automatique activee"}
+        {derniereSync
+          ? ` — ${lang === "ar" ? "اخر تحديث" : "derniere mise a jour"} ${derniereSync.toLocaleTimeString(
+              lang === "ar" ? "ar" : "fr-FR"
+            )}`
+          : ""}
+      </p>
       {syncMsg && <p className="sync-msg">{syncMsg}</p>}
 
       {loading ? (
