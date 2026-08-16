@@ -1,59 +1,340 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
-import { getSession } from "@/lib/session";
+"use client";
 
-export async function POST(req: NextRequest) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Non authentifie" }, { status: 401 });
+import { useEffect, useRef, useState, FormEvent } from "react";
+import { useLang } from "./LangProvider";
+import StatusBadge from "./StatusBadge";
+import { STATUS_CONFIG, STATUS_LIST, OrderStatus } from "@/lib/statusConfig";
+import { toWhatsAppNumber } from "@/lib/whatsapp";
 
-  const body = await req.json();
-  if (!body.clientNom || !body.clientTelephone) {
-    return NextResponse.json({ error: "Nom et telephone obligatoires" }, { status: 400 });
+type Produit = { nom: string; quantite: number; total: string };
+
+type Order = {
+  id: string;
+  wooId: number;
+  numero: string;
+  clientNom: string;
+  clientTelephone: string;
+  clientAdresse: string | null;
+  clientVille: string | null;
+  produits: Produit[];
+  total: number;
+  dateCommande: string;
+  statut: OrderStatus;
+  appele: boolean;
+  saisiLivraison: boolean;
+  notes: string | null;
+};
+
+const INTERVALLE_MS = 120000;
+
+const FORMULAIRE_VIDE = {
+  clientNom: "",
+  clientTelephone: "",
+  clientVille: "",
+  clientAdresse: "",
+  produit: "",
+  quantite: "1",
+  total: "",
+};
+
+export default function OrdersClient() {
+  const { t, lang } = useLang();
+  const L = (fr: string, ar: string) => (lang === "ar" ? ar : fr);
+
+  const [onglet, setOnglet] = useState<"web" | "instagram">("web");
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [derniereSync, setDerniereSync] = useState<Date | null>(null);
+  const [form, setForm] = useState(FORMULAIRE_VIDE);
+  const [formErreur, setFormErreur] = useState<string | null>(null);
+  const enCours = useRef(false);
+
+  async function loadOrders() {
+    const res = await fetch("/api/orders");
+    if (res.ok) setOrders(await res.json());
+    setLoading(false);
   }
 
-  const min = await prisma.order.aggregate({ _min: { wooId: true } });
-  const wooId = Math.min(-1, (min._min.wooId ?? 0) - 1);
+  async function synchroniser(silencieux: boolean) {
+    if (enCours.current) return;
+    enCours.current = true;
+    if (!silencieux) setSyncing(true);
 
-  const quantite = Number(body.quantite) || 1;
-  const total = Number(body.total) || 0;
+    try {
+      const res = await fetch("/api/orders/sync", { method: "POST" });
+      const data = await res.json();
 
-  const order = await prisma.order.create({
-    data: {
-      wooId,
-      numero: `IG-${Math.abs(wooId)}`,
-      clientNom: body.clientNom,
-      clientTelephone: body.clientTelephone,
-      clientAdresse: body.clientAdresse || "",
-      clientVille: body.clientVille || "",
-      produits: [
-        { nom: body.produit || "Produit", quantite, total: String(total) },
-      ],
-      total,
-      dateCommande: new Date(),
-      notes: body.notes || null,
-    },
-  });
-
-  return NextResponse.json(order);
-}
-
-export async function DELETE(req: NextRequest) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Non authentifie" }, { status: 401 });
-
-  const id = req.nextUrl.searchParams.get("id");
-  if (!id) return NextResponse.json({ error: "Identifiant manquant" }, { status: 400 });
-
-  const order = await prisma.order.findUnique({ where: { id } });
-  if (!order) return NextResponse.json({ error: "Commande introuvable" }, { status: 404 });
-
-  if (order.wooId >= 0) {
-    return NextResponse.json(
-      { error: "Seules les commandes Instagram peuvent etre supprimees" },
-      { status: 400 }
-    );
+      if (res.ok) {
+        setDerniereSync(new Date());
+        if (!silencieux || data.nouvelles > 0) {
+          setSyncMsg(
+            L(
+              `Synchronise : ${data.nouvelles} nouvelle(s) commande(s)`,
+              `تمت المزامنة: ${data.nouvelles} طلب جديد`
+            )
+          );
+        }
+        await loadOrders();
+      } else {
+        setSyncMsg(data.error || "Erreur");
+      }
+    } catch (e: any) {
+      setSyncMsg(e?.message ?? "Erreur de connexion");
+    } finally {
+      enCours.current = false;
+      setSyncing(false);
+    }
   }
 
-  await prisma.order.delete({ where: { id } });
-  return NextResponse.json({ ok: true });
+  useEffect(() => {
+    loadOrders();
+    synchroniser(true);
+
+    const minuteur = setInterval(() => {
+      if (document.visibilityState === "visible") synchroniser(true);
+    }, INTERVALLE_MS);
+
+    return () => clearInterval(minuteur);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleCall(order: Order) {
+    const number = toWhatsAppNumber(order.clientTelephone);
+    await fetch(`/api/orders/${order.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ marquerAppele: true }),
+    });
+    window.open(`https://wa.me/${number}`, "_blank");
+    loadOrders();
+  }
+
+  async function handleStatusChange(order: Order, statut: OrderStatus) {
+    await fetch(`/api/orders/${order.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ statut }),
+    });
+    loadOrders();
+  }
+
+  async function handleNotesBlur(order: Order, notes: string) {
+    if (notes === (order.notes || "")) return;
+    await fetch(`/api/orders/${order.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notes }),
+    });
+  }
+
+  async function ajouterCommande(e: FormEvent) {
+    e.preventDefault();
+    setFormErreur(null);
+
+    const res = await fetch("/api/orders/manuel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(form),
+    });
+
+    if (res.ok) {
+      setForm(FORMULAIRE_VIDE);
+      loadOrders();
+    } else {
+      const data = await res.json();
+      setFormErreur(data.error || "Erreur");
+    }
+  }
+
+  async function supprimerCommande(order: Order) {
+    await fetch(`/api/orders/manuel?id=${order.id}`, { method: "DELETE" });
+    loadOrders();
+  }
+
+  const commandesWeb = orders.filter((o) => o.wooId > 0);
+  const commandesInstagram = orders.filter((o) => o.wooId < 0);
+  const liste = onglet === "web" ? commandesWeb : commandesInstagram;
+
+  return (
+    <div>
+      <div className="page-header">
+        <h1>{t("orders_title")}</h1>
+        {onglet === "web" && (
+          <button className="btn-primary" onClick={() => synchroniser(false)} disabled={syncing}>
+            {syncing ? t("orders_syncing") : t("orders_sync")}
+          </button>
+        )}
+      </div>
+
+      <div className="lang-switcher" style={{ marginBottom: 16 }}>
+        <button
+          type="button"
+          className={onglet === "web" ? "active" : ""}
+          onClick={() => setOnglet("web")}
+          style={{ padding: "8px 16px", fontSize: 14 }}
+        >
+          {L("Commandes site web", "طلبات الموقع")} ({commandesWeb.length})
+        </button>
+        <button
+          type="button"
+          className={onglet === "instagram" ? "active" : ""}
+          onClick={() => setOnglet("instagram")}
+          style={{ padding: "8px 16px", fontSize: 14 }}
+        >
+          {L("Commandes Instagram", "طلبات إنستغرام")} ({commandesInstagram.length})
+        </button>
+      </div>
+
+      {onglet === "web" && (
+        <>
+          <p className="sync-msg">
+            {L("Synchronisation automatique activee", "المزامنة التلقائية مفعلة")}
+            {derniereSync
+              ? ` — ${L("derniere mise a jour", "اخر تحديث")} ${derniereSync.toLocaleTimeString(
+                  lang === "ar" ? "ar" : "fr-FR"
+                )}`
+              : ""}
+          </p>
+          {syncMsg && <p className="sync-msg">{syncMsg}</p>}
+        </>
+      )}
+
+      {onglet === "instagram" && (
+        <>
+          <form onSubmit={ajouterCommande} className="stock-form">
+            <input
+              placeholder={L("Nom du client *", "اسم الزبون *")}
+              value={form.clientNom}
+              onChange={(e) => setForm({ ...form, clientNom: e.target.value })}
+              required
+            />
+            <input
+              placeholder={L("Telephone *", "الهاتف *")}
+              value={form.clientTelephone}
+              onChange={(e) => setForm({ ...form, clientTelephone: e.target.value })}
+              required
+            />
+            <input
+              placeholder={L("Ville", "المدينة")}
+              value={form.clientVille}
+              onChange={(e) => setForm({ ...form, clientVille: e.target.value })}
+            />
+            <input
+              placeholder={L("Adresse", "العنوان")}
+              value={form.clientAdresse}
+              onChange={(e) => setForm({ ...form, clientAdresse: e.target.value })}
+            />
+            <input
+              placeholder={L("Produit", "المنتج")}
+              value={form.produit}
+              onChange={(e) => setForm({ ...form, produit: e.target.value })}
+            />
+            <input
+              type="number"
+              placeholder={L("Quantite", "الكمية")}
+              value={form.quantite}
+              onChange={(e) => setForm({ ...form, quantite: e.target.value })}
+            />
+            <input
+              type="number"
+              placeholder={L("Total", "المجموع")}
+              value={form.total}
+              onChange={(e) => setForm({ ...form, total: e.target.value })}
+            />
+            <button type="submit" className="btn-primary">
+              {L("Ajouter la commande", "إضافة الطلب")}
+            </button>
+          </form>
+          {formErreur && <p className="error">{formErreur}</p>}
+        </>
+      )}
+
+      {loading ? (
+        <p>…</p>
+      ) : liste.length === 0 ? (
+        <p className="empty">{t("orders_empty")}</p>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>{t("col_number")}</th>
+                <th>{t("col_client")}</th>
+                <th>{t("col_phone")}</th>
+                <th>{t("col_address")}</th>
+                <th>{t("col_products")}</th>
+                <th>{t("col_total")}</th>
+                <th>{t("col_date")}</th>
+                <th>{t("col_status")}</th>
+                <th>{t("col_notes")}</th>
+                {onglet === "instagram" && <th>{t("col_actions")}</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {liste.map((o) => (
+                <tr key={o.id} style={{ backgroundColor: STATUS_CONFIG[o.statut].bg + "55" }}>
+                  <td>{o.numero}</td>
+                  <td>{o.clientNom}</td>
+                  <td>
+                    <button className="phone-btn" onClick={() => handleCall(o)} type="button">
+                      {o.clientTelephone} · {t("call_button")}
+                    </button>
+                  </td>
+                  <td>
+                    {o.clientAdresse}
+                    {o.clientVille ? `, ${o.clientVille}` : ""}
+                  </td>
+                  <td>
+                    <ul className="products-list">
+                      {o.produits?.map((p, i) => (
+                        <li key={i}>
+                          {p.nom} × {p.quantite}
+                        </li>
+                      ))}
+                    </ul>
+                  </td>
+                  <td>{o.total}</td>
+                  <td>{new Date(o.dateCommande).toLocaleDateString(lang === "ar" ? "ar" : "fr-FR")}</td>
+                  <td>
+                    <StatusBadge statut={o.statut} />
+                    <select
+                      value={o.statut}
+                      onChange={(e) => handleStatusChange(o, e.target.value as OrderStatus)}
+                      aria-label={t("status_change")}
+                    >
+                      {STATUS_LIST.map((s) => (
+                        <option key={s} value={s}>
+                          {lang === "ar" ? STATUS_CONFIG[s].labelAr : STATUS_CONFIG[s].labelFr}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <input
+                      defaultValue={o.notes || ""}
+                      onBlur={(e) => handleNotesBlur(o, e.target.value)}
+                      className="notes-input"
+                    />
+                  </td>
+                  {onglet === "instagram" && (
+                    <td>
+                      <button
+                        className="btn-link danger"
+                        onClick={() => supprimerCommande(o)}
+                        type="button"
+                      >
+                        {t("delete")}
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
 }
