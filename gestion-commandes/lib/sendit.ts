@@ -31,6 +31,20 @@ async function obtenirToken() {
   return token;
 }
 
+// Detaille les erreurs de validation renvoyees par Sendit, champ par champ.
+function messageErreur(data: any, statut: number) {
+  const base = data?.message || `Erreur Sendit (${statut})`;
+  const erreurs = data?.errors;
+
+  if (erreurs && typeof erreurs === "object") {
+    const details = Object.entries(erreurs)
+      .map(([champ, msgs]) => `${champ}: ${Array.isArray(msgs) ? msgs.join(", ") : msgs}`)
+      .join(" | ");
+    if (details) return `${base} — ${details}`;
+  }
+  return base;
+}
+
 async function appel(chemin: string, options: RequestInit = {}) {
   const token = await obtenirToken();
 
@@ -47,13 +61,11 @@ async function appel(chemin: string, options: RequestInit = {}) {
   const data = await res.json().catch(() => null);
 
   if (!res.ok) {
-    throw new Error(data?.message || `Erreur Sendit (${res.status})`);
+    throw new Error(messageErreur(data, res.status));
   }
   return data;
 }
 
-// La pagination est indiquee a la racine de la reponse : total, per_page,
-// current_page, last_page. On parcourt donc toutes les pages.
 async function listerTout(chemin: string) {
   const tout: any[] = [];
   let page = 1;
