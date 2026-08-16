@@ -1,0 +1,454 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useLang } from "./LangProvider";
+import { OrderStatus } from "@/lib/statusConfig";
+
+type Produit = {
+  nom: string;
+  quantite: number;
+  total: string;
+  couleur?: string;
+  taille?: string;
+};
+
+type Order = {
+  id: string;
+  wooId: number;
+  numero: string;
+  clientNom: string;
+  clientTelephone: string;
+  clientAdresse: string | null;
+  clientVille: string | null;
+  produits: Produit[];
+  total: number;
+  statut: OrderStatus;
+  saisiLivraison: boolean;
+  senditCode: string | null;
+  notes: string | null;
+};
+
+type District = { id: number; name: string };
+
+const listeNue = { listStyle: "none", margin: 0, padding: 0 } as const;
+
+const boutonEnvoi = {
+  background: "#4b508f",
+  color: "white",
+  border: "none",
+  padding: "8px 12px",
+  borderRadius: 8,
+  cursor: "pointer",
+  fontSize: 12,
+  fontWeight: 700,
+  whiteSpace: "nowrap",
+} as const;
+
+const boutonMaj = {
+  background: "#f59e0b",
+  color: "white",
+  border: "none",
+  padding: "6px 10px",
+  borderRadius: 6,
+  cursor: "pointer",
+  fontSize: 11,
+  fontWeight: 700,
+  whiteSpace: "nowrap",
+  marginTop: 5,
+} as const;
+
+const STATUTS: { [cle: string]: { fr: string; ar: string; fond: string; texte: string } } = {
+  PENDING: { fr: "En attente", ar: "\u0641\u064A \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631", fond: "#fef9c3", texte: "#854d0e" },
+  PICKED_UP: { fr: "Ramasse", ar: "\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645", fond: "#dbeafe", texte: "#1e40af" },
+  IN_TRANSIT: { fr: "En transit", ar: "\u0641\u064A \u0627\u0644\u0637\u0631\u064A\u0642", fond: "#dbeafe", texte: "#1e40af" },
+  DELIVERING: { fr: "En livraison", ar: "\u0642\u064A\u062F \u0627\u0644\u062A\u0648\u0635\u064A\u0644", fond: "#e0e7ff", texte: "#3730a3" },
+  DELIVERED: { fr: "Livre", ar: "\u062A\u0645 \u0627\u0644\u062A\u0633\u0644\u064A\u0645", fond: "#dcfce7", texte: "#166534" },
+  RETURNED: { fr: "Retourne", ar: "\u0645\u064F\u0631\u062C\u0639", fond: "#fee2e2", texte: "#991b1b" },
+  CANCELED: { fr: "Annule", ar: "\u0645\u0644\u063A\u0649", fond: "#fee2e2", texte: "#991b1b" },
+};
+
+function Variante(props: { valeur?: string; fond: string; texte: string }) {
+  if (!props.valeur) return <span style={{ color: "#94a3b8" }}>-</span>;
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        background: props.fond,
+        color: props.texte,
+        padding: "3px 9px",
+        borderRadius: 999,
+        fontSize: 11,
+        fontWeight: 700,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {props.valeur}
+    </span>
+  );
+}
+
+function normaliser(texte: string) {
+  return (texte || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function districtParDefaut(ville: string | null, districts: District[]) {
+  const v = normaliser(ville || "");
+  if (!v) return null;
+  return (
+    districts.find((d) => normaliser(d.name) === v) ||
+    districts.find((d) => normaliser(d.name).startsWith(v)) ||
+    null
+  );
+}
+
+export default function ExpeditionClient() {
+  const { t, lang } = useLang();
+  const L = (fr: string, ar: string) => (lang === "ar" ? ar : fr);
+
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [districts, setDistricts] = useState<District[]>([]);
+  const [statuts, setStatuts] = useState<{ [code: string]: string }>({});
+  const [choix, setChoix] = useState<{ [id: string]: string }>({});
+  const [zoneTexte, setZoneTexte] = useState<{ [id: string]: string }>({});
+  const [loading, setLoading] = useState(true);
+  const [suiviEnCours, setSuiviEnCours] = useState(false);
+  const [action, setAction] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function load() {
+    const res = await fetch("/api/orders");
+    if (res.ok) {
+      const all: Order[] = await res.json();
+      setOrders(all.filter((o) => o.statut === "CONFIRMEE" || o.statut === "EXPEDIEE"));
+    }
+    setLoading(false);
+  }
+
+  async function chargerDistricts() {
+    try {
+      const res = await fetch("/api/sendit");
+      const data = await res.json();
+      if (res.ok && Array.isArray(data.liste)) setDistricts(data.liste);
+      else setMessage(data.error || "Zones Sendit indisponibles");
+    } catch {
+      setMessage("Zones Sendit indisponibles");
+    }
+  }
+
+  async function chargerSuivi() {
+    setSuiviEnCours(true);
+    try {
+      const res = await fetch("/api/sendit/suivi");
+      const data = await res.json();
+      if (res.ok && data.statuts) setStatuts(data.statuts);
+    } catch {
+      setStatuts({});
+    } finally {
+      setSuiviEnCours(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    chargerDistricts();
+    chargerSuivi();
+  }, []);
+
+  useEffect(() => {
+    if (districts.length === 0 || orders.length === 0) return;
+
+    setZoneTexte((actuel) => {
+      const suivant = { ...actuel };
+      const nouveaux: { [id: string]: string } = {};
+
+      for (const o of orders) {
+        if (suivant[o.id] === undefined) {
+          const d = districtParDefaut(o.clientVille, districts);
+          suivant[o.id] = d ? d.name : "";
+          if (d) nouveaux[o.id] = String(d.id);
+        }
+      }
+
+      if (Object.keys(nouveaux).length > 0) setChoix((c) => ({ ...nouveaux, ...c }));
+      return suivant;
+    });
+  }, [districts, orders]);
+
+  function choisirZone(orderId: string, valeur: string) {
+    setZoneTexte((z) => ({ ...z, [orderId]: valeur }));
+    const d = districts.find((x) => normaliser(x.name) === normaliser(valeur));
+    setChoix((c) => ({ ...c, [orderId]: d ? String(d.id) : "" }));
+  }
+
+  async function modifier(order: Order, champ: string, valeur: string) {
+    const corps: { [cle: string]: unknown } = {};
+    corps[champ] = champ === "total" ? Number(valeur) : valeur;
+
+    await fetch(`/api/orders/${order.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(corps),
+    });
+    load();
+  }
+
+  async function envoyerSendit(order: Order) {
+    const districtId = choix[order.id];
+    if (!districtId) {
+      setMessage(L("Zone de livraison non reconnue.", "\u0645\u0646\u0637\u0642\u0629 \u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641\u0629"));
+      return;
+    }
+
+    setAction(order.id);
+    setMessage(null);
+
+    try {
+      const res = await fetch("/api/sendit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: order.id, districtId }),
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        setMessage(L(`Colis cree : ${data.code}`, `\u062A\u0645 \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0637\u0631\u062F: ${data.code}`));
+        await load();
+        chargerSuivi();
+      } else {
+        setMessage(data.error || "Erreur");
+      }
+    } catch (e: any) {
+      setMessage(e?.message ?? "Erreur de connexion");
+    } finally {
+      setAction(null);
+    }
+  }
+
+  async function majColis(order: Order) {
+    const districtId = choix[order.id];
+    if (!districtId) {
+      setMessage(L("Zone de livraison non reconnue.", "\u0645\u0646\u0637\u0642\u0629 \u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641\u0629"));
+      return;
+    }
+
+    setAction(order.id);
+    setMessage(null);
+
+    try {
+      const res = await fetch("/api/sendit", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: order.id, districtId }),
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        setMessage(L(`Colis mis a jour : ${data.code}`, `\u062A\u0645 \u062A\u062D\u062F\u064A\u062B \u0627\u0644\u0637\u0631\u062F: ${data.code}`));
+        await load();
+        chargerSuivi();
+      } else {
+        setMessage(data.error || "Erreur");
+      }
+    } catch (e: any) {
+      setMessage(e?.message ?? "Erreur de connexion");
+    } finally {
+      setAction(null);
+    }
+  }
+
+  const enAttente = orders.filter((o) => !o.senditCode).length;
+
+  return (
+    <div>
+      <div className="page-header">
+        <h1>{t("expedition_title")}</h1>
+        <button className="btn-primary" onClick={chargerSuivi} disabled={suiviEnCours}>
+          {suiviEnCours ? L("Actualisation...", "\u062C\u0627\u0631\u064D") : L("Actualiser le suivi", "\u062A\u062D\u062F\u064A\u062B \u0627\u0644\u062A\u062A\u0628\u0639")}
+        </button>
+      </div>
+
+      <datalist id="zones-sendit">
+        {districts.map((d) => (
+          <option key={d.id} value={d.name} />
+        ))}
+      </datalist>
+
+      {!loading && orders.length > 0 && (
+        <p className="sync-msg">
+          {L(`${enAttente} commande(s) a envoyer`, `${enAttente} \u0637\u0644\u0628 \u0644\u0644\u0625\u0631\u0633\u0627\u0644`)}
+          {districts.length > 0 ? ` - ${districts.length} zones Sendit` : ""}
+        </p>
+      )}
+      {message && <p className="sync-msg">{message}</p>}
+
+      {loading ? (
+        <p>...</p>
+      ) : orders.length === 0 ? (
+        <p className="empty">{t("expedition_empty")}</p>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>{t("col_number")}</th>
+                <th>{t("col_client")}</th>
+                <th>{t("col_phone")}</th>
+                <th>{t("col_address")}</th>
+                <th>{L("Ville", "\u0627\u0644\u0645\u062F\u064A\u0646\u0629")}</th>
+                <th>{t("col_products")}</th>
+                <th>{L("Couleur", "\u0627\u0644\u0644\u0648\u0646")}</th>
+                <th>{L("Taille", "\u0627\u0644\u0645\u0642\u0627\u0633")}</th>
+                <th>{t("col_total")}</th>
+                <th>{L("Note sur etiquette", "\u0645\u0644\u0627\u062D\u0638\u0629 \u0639\u0644\u0649 \u0627\u0644\u0645\u0644\u0635\u0642")}</th>
+                <th>{L("Zone Sendit", "\u0645\u0646\u0637\u0642\u0629 \u0633\u0648\u0646\u062F\u064A\u062A")}</th>
+                <th>{L("Colis / Suivi", "\u0627\u0644\u0637\u0631\u062F")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orders.map((o) => {
+                const brut = o.senditCode ? statuts[o.senditCode] : null;
+                const info = brut ? STATUTS[brut] : null;
+                const occupe = action === o.id;
+
+                return (
+                  <tr key={o.id}>
+                    <td>{o.numero}</td>
+                    <td>
+                      <input
+                        defaultValue={o.clientNom}
+                        onBlur={(e) => modifier(o, "clientNom", e.target.value)}
+                        className="notes-input"
+                        style={{ width: 130 }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        defaultValue={o.clientTelephone}
+                        onBlur={(e) => modifier(o, "clientTelephone", e.target.value)}
+                        className="notes-input"
+                        style={{ width: 120 }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        defaultValue={o.clientAdresse || ""}
+                        onBlur={(e) => modifier(o, "clientAdresse", e.target.value)}
+                        className="notes-input"
+                        style={{ width: 160 }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        defaultValue={o.clientVille || ""}
+                        onBlur={(e) => modifier(o, "clientVille", e.target.value)}
+                        className="notes-input"
+                        style={{ width: 110 }}
+                      />
+                    </td>
+                    <td>
+                      <ul style={listeNue}>
+                        {o.produits?.map((p, i) => (
+                          <li key={i} style={{ marginBottom: 6 }}>
+                            {p.nom} x {p.quantite}
+                          </li>
+                        ))}
+                      </ul>
+                    </td>
+                    <td>
+                      <ul style={listeNue}>
+                        {o.produits?.map((p, i) => (
+                          <li key={i} style={{ marginBottom: 6 }}>
+                            <Variante valeur={p.couleur} fond="#e0e7ff" texte="#3730a3" />
+                          </li>
+                        ))}
+                      </ul>
+                    </td>
+                    <td>
+                      <ul style={listeNue}>
+                        {o.produits?.map((p, i) => (
+                          <li key={i} style={{ marginBottom: 6 }}>
+                            <Variante valeur={p.taille} fond="#fce7f3" texte="#9d174d" />
+                          </li>
+                        ))}
+                      </ul>
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        defaultValue={o.total}
+                        onBlur={(e) => modifier(o, "total", e.target.value)}
+                        className="notes-input"
+                        style={{ width: 85, fontWeight: 700 }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        defaultValue={o.notes || ""}
+                        onBlur={(e) => modifier(o, "notes", e.target.value)}
+                        placeholder={L("Note pour le livreur", "\u0645\u0644\u0627\u062D\u0638\u0629 \u0644\u0644\u0645\u0648\u0635\u0644")}
+                        className="notes-input"
+                        style={{ width: 170 }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        list="zones-sendit"
+                        value={zoneTexte[o.id] || ""}
+                        onChange={(e) => choisirZone(o.id, e.target.value)}
+                        placeholder={L("Tapez la ville", "\u0627\u0643\u062A\u0628 \u0627\u0644\u0645\u062F\u064A\u0646\u0629")}
+                        className="notes-input"
+                        style={{ width: 165 }}
+                      />
+                      {!choix[o.id] && (
+                        <div style={{ fontSize: 10, color: "#b91c1c", marginTop: 3 }}>
+                          {L("zone non reconnue", "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641\u0629")}
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      {o.senditCode ? (
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 12 }}>{o.senditCode}</div>
+                          {brut && (
+                            <div style={{ marginTop: 4 }}>
+                              <Variante
+                                valeur={info ? L(info.fr, info.ar) : brut}
+                                fond={info ? info.fond : "#e2e8f0"}
+                                texte={info ? info.texte : "#475569"}
+                              />
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            style={boutonMaj}
+                            onClick={() => majColis(o)}
+                            disabled={occupe}
+                          >
+                            {occupe ? "..." : L("Mettre a jour le colis", "\u062A\u062D\u062F\u064A\u062B \u0627\u0644\u0637\u0631\u062F")}
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          style={boutonEnvoi}
+                          onClick={() => envoyerSendit(o)}
+                          disabled={occupe}
+                        >
+                          {occupe ? L("Envoi...", "\u062C\u0627\u0631\u064D") : L("Envoyer a Sendit", "\u0625\u0631\u0633\u0627\u0644")}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
