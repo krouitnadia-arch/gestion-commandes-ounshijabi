@@ -68,11 +68,10 @@ function texteMeta(valeur: unknown): string {
   return "";
 }
 
-// Repere la couleur et la taille parmi les options de la ligne de commande.
 function extraireVariantes(li: WooLineItem) {
   let couleur = "";
   let taille = "";
-  const options: string[] = [];
+  const autres: { cle: string; valeur: string }[] = [];
 
   for (const meta of li.meta_data || []) {
     const brut = String(meta.display_key ?? meta.key ?? "");
@@ -83,16 +82,28 @@ function extraireVariantes(li: WooLineItem) {
     if (!valeur) continue;
 
     if (cle.includes("couleur") || cle.includes("color") || cle.includes("لون")) {
-      couleur = valeur;
+      couleur = couleur || valeur;
     } else if (
       cle.includes("taille") ||
       cle.includes("size") ||
       cle.includes("pointure") ||
       cle.includes("مقاس")
     ) {
-      taille = valeur;
+      taille = taille || valeur;
     } else {
-      options.push(`${brut} : ${valeur}`);
+      autres.push({ cle: brut, valeur });
+    }
+  }
+
+  // Dans cette boutique, l'option de couleur porte le nom du modele
+  // (exemple : "Nysma : Blanc"). Faute de cle explicite, la premiere
+  // option restante est consideree comme la couleur.
+  const options: string[] = [];
+  for (const o of autres) {
+    if (!couleur) {
+      couleur = o.valeur;
+    } else {
+      options.push(`${o.cle} : ${o.valeur}`);
     }
   }
 
