@@ -21,6 +21,7 @@ enum OrderStatus {
   ANNULEE
   REPORTEE
   RETRAIT_MAGASIN
+  EXPEDIEE
 }
 
 model User {
