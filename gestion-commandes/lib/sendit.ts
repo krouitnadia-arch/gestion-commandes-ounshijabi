@@ -51,20 +51,38 @@ async function appel(chemin: string, options: RequestInit = {}) {
   return data;
 }
 
-// Certaines reponses sont paginees : on ramene toujours un tableau simple.
-function extraireListe(reponse: any) {
-  const d = reponse?.data;
-  if (Array.isArray(d)) return d;
-  if (Array.isArray(d?.data)) return d.data;
+function extraireListe(bloc: any) {
+  if (Array.isArray(bloc)) return bloc;
+  if (Array.isArray(bloc?.data)) return bloc.data;
   return [];
 }
 
+// L'API renvoie les villes par pages : on les lit toutes.
+async function listerTout(chemin: string) {
+  const tout: any[] = [];
+  let page = 1;
+  let dernierePage = 1;
+
+  do {
+    const separateur = chemin.includes("?") ? "&" : "?";
+    const reponse = await appel(`${chemin}${separateur}page=${page}`);
+    const bloc = reponse?.data;
+
+    tout.push(...extraireListe(bloc));
+
+    dernierePage = Number(bloc?.last_page) || 1;
+    page++;
+  } while (page <= dernierePage && page <= 60);
+
+  return tout;
+}
+
 export async function listerDistricts() {
-  return extraireListe(await appel("/districts"));
+  return listerTout("/districts");
 }
 
 export async function listerVillesRamassage() {
-  return extraireListe(await appel("/districts/pickup-cities"));
+  return listerTout("/districts/pickup-cities");
 }
 
 export async function creerColis(colis: Record<string, unknown>) {
