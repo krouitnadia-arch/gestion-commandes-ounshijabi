@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { fetchWooOrders, wooOrderToLocal } from "@/lib/woocommerce";
 
+const PREFIXE_IGNORE = "IGNORE:";
+
 export async function POST() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Non authentifie" }, { status: 401 });
@@ -11,10 +13,23 @@ export async function POST() {
     const debut = process.env.SYNC_DEBUT || "2026-08-01";
     const after = new Date(`${debut}T00:00:00Z`).toISOString();
 
+    // Commandes supprimees ou fusionnees : on ne les reimporte plus.
+    const marqueurs = await prisma.syncLog.findMany({
+      where: { message: { startsWith: PREFIXE_IGNORE } },
+      select: { message: true },
+    });
+    const ignores = new Set<number>();
+    for (const m of marqueurs) {
+      const valeur = Number((m.message || "").replace(PREFIXE_IGNORE, ""));
+      if (!Number.isNaN(valeur)) ignores.add(valeur);
+    }
+
     const wooOrders = await fetchWooOrders({ perPage: 100, after });
     let nouvelles = 0;
 
     for (const wo of wooOrders) {
+      if (ignores.has(wo.id)) continue;
+
       const local = wooOrderToLocal(wo);
       const existing = await prisma.order.findUnique({ where: { wooId: wo.id } });
 
