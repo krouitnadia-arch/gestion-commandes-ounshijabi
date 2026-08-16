@@ -1,9 +1,10 @@
 const BASE = "https://app.sendit.ma/api/v1";
 
-let cache: { token: string; expire: number } | null = null;
+let cacheToken: { token: string; expire: number } | null = null;
+let cacheDistricts: { liste: any[]; expire: number } | null = null;
 
 async function obtenirToken() {
-  if (cache && cache.expire > Date.now()) return cache.token;
+  if (cacheToken && cacheToken.expire > Date.now()) return cacheToken.token;
 
   const public_key = process.env.SENDIT_PUBLIC_KEY;
   const secret_key = process.env.SENDIT_SECRET_KEY;
@@ -26,7 +27,7 @@ async function obtenirToken() {
     throw new Error(data?.message || "Echec de connexion a Sendit");
   }
 
-  cache = { token, expire: Date.now() + 30 * 60 * 1000 };
+  cacheToken = { token, expire: Date.now() + 30 * 60 * 1000 };
   return token;
 }
 
@@ -51,13 +52,8 @@ async function appel(chemin: string, options: RequestInit = {}) {
   return data;
 }
 
-function extraireListe(bloc: any) {
-  if (Array.isArray(bloc)) return bloc;
-  if (Array.isArray(bloc?.data)) return bloc.data;
-  return [];
-}
-
-// L'API renvoie les villes par pages : on les lit toutes.
+// La pagination est indiquee a la racine de la reponse : total, per_page,
+// current_page, last_page. On parcourt donc toutes les pages.
 async function listerTout(chemin: string) {
   const tout: any[] = [];
   let page = 1;
@@ -66,19 +62,28 @@ async function listerTout(chemin: string) {
   do {
     const separateur = chemin.includes("?") ? "&" : "?";
     const reponse = await appel(`${chemin}${separateur}page=${page}`);
-    const bloc = reponse?.data;
 
-    tout.push(...extraireListe(bloc));
+    const liste = Array.isArray(reponse?.data)
+      ? reponse.data
+      : Array.isArray(reponse?.data?.data)
+      ? reponse.data.data
+      : [];
 
-    dernierePage = Number(bloc?.last_page) || 1;
+    tout.push(...liste);
+
+    dernierePage = Number(reponse?.last_page ?? reponse?.data?.last_page) || 1;
     page++;
-  } while (page <= dernierePage && page <= 60);
+  } while (page <= dernierePage && page <= 100);
 
   return tout;
 }
 
 export async function listerDistricts() {
-  return listerTout("/districts");
+  if (cacheDistricts && cacheDistricts.expire > Date.now()) return cacheDistricts.liste;
+
+  const liste = await listerTout("/districts");
+  cacheDistricts = { liste, expire: Date.now() + 60 * 60 * 1000 };
+  return liste;
 }
 
 export async function listerVillesRamassage() {
