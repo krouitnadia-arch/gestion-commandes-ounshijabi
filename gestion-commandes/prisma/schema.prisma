@@ -49,6 +49,7 @@ model Order {
   appeleA         DateTime?
   appelePar       String?
   saisiLivraison  Boolean     @default(false)
+  senditCode      String?
   notes           String?
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
