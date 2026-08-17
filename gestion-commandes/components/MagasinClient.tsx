@@ -187,7 +187,7 @@ export default function MagasinClient() {
     <div>
       <div className="page-header">
         <h1>{L("Magasin", "\u0627\u0644\u0645\u062A\u062C\u0631")}</h1>
-      </div>
+      <h1>{L("Magasin", "\u0627\u0644\u0645\u062A\u062C\u0631")}</h1>
 
       <div className="lang-switcher" style={{ marginBottom: 16 }}>
         <button
