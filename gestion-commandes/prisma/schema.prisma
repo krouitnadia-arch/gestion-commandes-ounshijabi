@@ -1,0 +1,98 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  CONFIRMATION
+  EXPEDITION
+  STOCK
+}
+
+enum OrderStatus {
+  NOUVELLE
+  APPELE
+  CONFIRMEE
+  ANNULEE
+  REPORTEE
+  RETRAIT_MAGASIN
+  EXPEDIEE
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(CONFIRMATION)
+  actif     Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  wooId           Int         @unique
+  numero          String
+  clientNom       String
+  clientTelephone String
+  clientAdresse   String?
+  clientVille     String?
+  produits        Json
+  total           Float
+  dateCommande    DateTime
+  statut          OrderStatus @default(NOUVELLE)
+  appele          Boolean     @default(false)
+  appeleA         DateTime?
+  appelePar       String?
+  saisiLivraison  Boolean     @default(false)
+  senditCode      String?
+  notes           String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([statut])
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  wooId       Int?     @unique
+  parentId    Int?
+  sku         String?
+  reference   String?
+  nom         String
+  categorie   String?
+  couleur     String?
+  taille      String?
+  quantite    Int      @default(0)
+  seuilAlerte Int      @default(5)
+  prix        Float?
+  updatedAt   DateTime @updatedAt
+
+  @@index([categorie])
+}
+
+model Vente {
+  id        String   @id @default(cuid())
+  date      DateTime @default(now())
+  lignes    Json
+  total     Float
+  paiement  String?
+  notes     String?
+  vendeur   String?
+  createdAt DateTime @default(now())
+
+  @@index([date])
+}
+
+model SyncLog {
+  id          String   @id @default(cuid())
+  date        DateTime @default(now())
+  nbNouvelles Int      @default(0)
+  succes      Boolean  @default(true)
+  message     String?
+}
