@@ -132,3 +132,44 @@ export async function majStockWoo(wooId: number, parentId: number | null, quanti
     body: JSON.stringify({ manage_stock: true, stock_quantity: quantite }),
   });
 }
+
+export async function importerUnProduit(productId: number) {
+  const p = await appelWoo(`/products/${productId}`);
+  const resultat: ProduitImporte[] = [];
+
+  const categorie =
+    Array.isArray(p.categories) && p.categories.length > 0 ? p.categories[0].name : null;
+
+  if (p.type === "variable") {
+    const variations = await appelWoo(`/products/${p.id}/variations?per_page=100`);
+
+    for (const v of variations || []) {
+      const info = lireVariantes(v.attributes);
+      resultat.push({
+        wooId: v.id,
+        parentId: p.id,
+        sku: v.sku || null,
+        nom: p.name,
+        categorie,
+        couleur: info.couleur,
+        taille: info.taille,
+        quantite: Number(v.stock_quantity) || 0,
+        prix: v.price ? Number(v.price) : null,
+      });
+    }
+  } else {
+    resultat.push({
+      wooId: p.id,
+      parentId: null,
+      sku: p.sku || null,
+      nom: p.name,
+      categorie,
+      couleur: null,
+      taille: null,
+      quantite: Number(p.stock_quantity) || 0,
+      prix: p.price ? Number(p.price) : null,
+    });
+  }
+
+  return resultat;
+}
