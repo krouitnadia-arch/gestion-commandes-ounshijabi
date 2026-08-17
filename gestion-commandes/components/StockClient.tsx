@@ -1,4 +1,4 @@
-! "use client";
+"use client";
 
 import { useEffect, useState, FormEvent } from "react";
 import { useLang } from "./LangProvider";
