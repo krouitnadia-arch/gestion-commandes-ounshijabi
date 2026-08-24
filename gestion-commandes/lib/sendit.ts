@@ -119,3 +119,19 @@ export async function modifierColis(code: string, colis: Record<string, unknown>
 export async function supprimerColis(code: string) {
   return appel(`/deliveries/${encodeURIComponent(code)}`, { method: "DELETE" });
 }
+
+export async function statutColis(code: string) {
+  try {
+    const r: any = await suivreColis(code);
+    return { supprime: false, statut: r?.data?.status || "INCONNU" };
+  } catch (e: any) {
+    const m = String(e?.message || "").toLowerCase();
+    const introuvable =
+      m.includes("404") ||
+      m.includes("introuvable") ||
+      m.includes("not found") ||
+      m.includes("no query results");
+
+    return { supprime: introuvable, statut: introuvable ? "SUPPRIME" : "INCONNU" };
+  }
+}
